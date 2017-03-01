@@ -7,7 +7,17 @@ go-mpi are GO bindings for the Message Passing Interface <a href=http://www.mpi-
 MPI is a standard but the different implementations differ in some details.
 At the moment go-mpi support  <a href=http://www.open-mpi.de/>Open MPI</a> and <a href=http://www.mpich.org/>MPICH</a> version 2.
 
-To tell go where to look for mpi.h and mpi library, use the CGO_CFLAGS and CGO_LDFALG environment variable to indicate respectively. You can find paths of mpi.h and mpi library through command:
+To tell go where to look for mpi.h and mpi library, use the CGO_CFLAGS and CGO_LDFALG environment variable to indicate respectively.
+
+For Open MPI:
+```sh
+export CGO_LDFLAGS='-L/usr/lib/openmpi -lmpi'
+go install go-mpi/MPI
+```
+
+For MPICH:
+
+You can find paths of mpi.h and mpi library through command:
 
 	$ mpichversion
 
