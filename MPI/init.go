@@ -32,16 +32,22 @@ func Init(argv *[]string) int {
 	argc := len(*argv)
 	c_argc := C.int(argc)
 
-	c_argv := make([]*C.char, argc)
+	c_argv := C.malloc(C.size_t(c_argc) * C.size_t(unsafe.Sizeof(uintptr(0))))
+	c_argv_cast := (*[1<<30 - 1]*C.char)(c_argv)
 	for index, value := range *argv {
-		c_argv[index] = C.CString(value)
-		defer C.free(unsafe.Pointer(c_argv[index]))
+		c_argv_cast[index] = C.CString(value)
 	}
 
 	err := C.MPI_Init(&c_argc, (***C.char)(unsafe.Pointer(&c_argv)))
-	goargs := make([]string, c_argc)
-	for i := 0; i < int(c_argc); i++ {
-		goargs[i] = C.GoString(c_argv[i])
+
+	defer C.free(c_argv)
+	c_argv_cast = (*[1<<30 - 1]*C.char)(c_argv)
+
+	argc = int(c_argc)
+	goargs := make([]string, argc)
+	for i := 0; i < argc; i++ {
+		goargs[i] = C.GoString(c_argv_cast[i])
+		defer C.free(unsafe.Pointer(c_argv_cast[i]))
 	}
 	*argv = goargs
 	return int(err)
@@ -54,17 +60,23 @@ func Init_thread(argv *[]string, required int) (int, int) {
 	argc := len(*argv)
 	c_argc := C.int(argc)
 
-	c_argv := make([]*C.char, argc)
+	c_argv := C.malloc(C.size_t(c_argc) * C.size_t(unsafe.Sizeof(uintptr(0))))
+	c_argv_cast := (*[1<<30 - 1]*C.char)(c_argv)
 	for index, value := range *argv {
-		c_argv[index] = C.CString(value)
-		defer C.free(unsafe.Pointer(c_argv[index]))
+		c_argv_cast[index] = C.CString(value)
 	}
 
 	var provided int
 	err := C.MPI_Init_thread(&c_argc, (***C.char)(unsafe.Pointer(&c_argv)), C.int(required), (*C.int)(unsafe.Pointer(&provided)))
-	goargs := make([]string, c_argc)
-	for i := 0; i < int(c_argc); i++ {
-		goargs[i] = C.GoString(c_argv[i])
+
+	defer C.free(c_argv)
+	c_argv_cast = (*[1<<30 - 1]*C.char)(c_argv)
+
+	argc = int(c_argc)
+	goargs := make([]string, argc)
+	for i := 0; i < argc; i++ {
+		goargs[i] = C.GoString(c_argv_cast[i])
+		defer C.free(unsafe.Pointer(c_argv_cast[i]))
 	}
 	*argv = goargs
 	return provided, int(err)
