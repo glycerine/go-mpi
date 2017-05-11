@@ -173,12 +173,21 @@ func Type_create_struct(array_of_blocklengths []int,
 	var newtype C.MPI_Datatype
 	count := len(array_of_types)
 	if count == len(array_of_displacements) && count == len(array_of_blocklengths) {
+		cArrayOfBlocklengths := make([]C.int, count)
+		cArrayOfDisplacements := make([]C.MPI_Aint, count)
+		cArrayOfTypes := make([]C.MPI_Datatype, count)
+
+		for i := 0; i < count; i++ {
+			cArrayOfBlocklengths[i] = C.int(array_of_blocklengths[i])
+			cArrayOfDisplacements[i] = C.MPI_Aint(array_of_displacements[i])
+			cArrayOfTypes[i] = C.MPI_Datatype(array_of_types[i])
+		}
 
 		err := C.MPI_Type_create_struct(C.int(count),
-			(*C.int)(unsafe.Pointer(&array_of_blocklengths[0])),
-			(*C.MPI_Aint)(unsafe.Pointer(&array_of_displacements[0])),
-			(*C.MPI_Datatype)(unsafe.Pointer(&array_of_types[0])),
-			(*C.MPI_Datatype)(unsafe.Pointer(&newtype)))
+			&cArrayOfBlocklengths[0],
+			&cArrayOfDisplacements[0],
+			&cArrayOfTypes[0],
+			&newtype)
 
 		return Datatype(newtype), int(err)
 
