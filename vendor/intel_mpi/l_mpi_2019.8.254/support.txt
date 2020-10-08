@@ -1,0 +1,8 @@
+Package ID: l_mpi_p_2019.8.108
+
+Package Contents:
+	Intel(R) MPI Library 2019 Update 8 for Linux*
+
+Please use the above information when submitting customer support requests.
+For Technical Support, Product Updates, tips and tricks, and other support information, please contact the Intel technical consulting engineer who granted you access to this package.
+

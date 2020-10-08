@@ -16,6 +16,8 @@
 package MPI
 
 /*
+#cgo CFLAGS: -I/opt/intel/impi/2019.8.254/intel64/include
+#cgo LDFLAGS: /opt/intel/impi/2019.8.254/intel64/lib/release/libmpi.a -ldl /usr/local/lib/libfabric.a -lrt
 #include <mpi.h>
 #include "const-helper.h"
 */

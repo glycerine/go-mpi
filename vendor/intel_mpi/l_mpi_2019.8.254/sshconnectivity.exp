@@ -1,0 +1,600 @@
+#!/usr/bin/expect -f
+
+# $Revision: 259 $
+# $Date: 2012-06-11 23:26:12 +0400 (Mon, 11 Jun 2012) $
+
+#
+# Copyright 2005-2012 Intel Corporation.
+# 
+# This software and the related documents are Intel copyrighted materials, and
+# your use of them is governed by the express license under which they were
+# provided to you ("License"). Unless the License provides otherwise, you may
+# not use, modify, copy, publish, distribute, disclose or transmit this software
+# or the related documents without Intel's prior written permission.
+# 
+# This software and the related documents are provided as is, with no express
+# or implied warranties, other than those that are expressly stated in the
+# License.
+#
+# "sshconnectivity.exp" is a simple expect script to establish Secure
+# Shell Connectivity on a distributed computing cluster
+#
+
+log_file -noappend /tmp/sshconnectivity.$env(USER).log
+
+proc send_copyright_message {} {
+
+    send_error "\nCopyright (C) 2005-2012 Intel Corporation.  All Rights Reserved.\n"
+
+}
+proc send_version_message {} {
+
+    send_error "                   Version number: \$Revision: 259 $\n"
+    send_error "                   Version date: \$Date: 2012-06-11 23:26:12 +0400 (Mon, 11 Jun 2012) $\n"
+
+}
+proc send_help_message {} {
+
+    send_error "Usage: sshconnectivity.exp \[options\] filename\n"
+    send_error "Options:\n"
+    send_error "  --help           Display this information. This \"expect\" script helps to\n"
+    send_error "                   establish secure shell connectivity on a cluster. Please\n"
+    send_error "                   see the installation section of the Intel(r) Cluster Studio\n"
+    send_error "                   or Intel(r) Cluster Studio XE User's Guide for additional\n"
+    send_error "                   information.\n"
+    send_error "  --version\n"
+
+    send_version_message
+
+}
+
+proc get_cluster_password {prompt} {
+
+    global back_space_or_delete two_back_spaces
+
+    # Record the print terminal line settings
+    set old_stty_settings [stty -echo raw]
+
+    # Prompt the user for a cluster password
+    send_user $prompt
+
+    set cluster_password ""
+
+    expect {
+        -re "\r" {
+            send_user \r\n
+        }
+        -re $back_space_or_delete {
+            # A backspace or a delete character has been entered. Is the string
+            # length greater than 0?
+            if {[string length $cluster_password] > 0} {
+                # Backspace twice to account for the original character and the
+                # asterisk-suppression character
+                send $two_back_spaces
+
+                # Ignore the contents of the variable "disregard"
+                regexp (.*). $cluster_password disregard cluster_password
+            }
+            exp_continue
+        }
+        -re . {
+            send_user "*"
+            append cluster_password $expect_out(0,string)
+            exp_continue
+        }
+    }
+    # Restore the print terminal line settings
+    eval stty $old_stty_settings
+
+    # Return the cluster password back to the caller
+    return $cluster_password
+}
+
+set timeout -1
+match_max 100000
+
+set node_file ""
+set cmd_line_error_detected 0
+set node_count 0
+set success_count 0
+set prompt "^.*.*(%|\\\$|#|\[^>\]>) $"
+set back_space_or_delete "\010|\177"
+set two_back_spaces "\010 \010"
+
+# Is at least one argument provided on the command-line?
+if {$argc < 1} {
+    send_help_message
+    exit
+}
+
+# Are the command-line arguments valid?
+foreach cmdline_arg $argv {
+    switch -glob -- $cmdline_arg {
+        --h {
+            send_help_message
+            send_copyright_message
+            exit
+        }
+        --help {
+            send_help_message
+            send_copyright_message
+            exit
+        }
+        --v {
+            send_version_message
+            send_copyright_message
+            exit
+        }
+        --version {
+            send_version_message
+            send_copyright_message
+            exit
+        }
+        default {
+            # Assume that this command-line argument is a file name. Is this a
+            # valid file name?
+            if {$node_file != ""} {
+                send_error "Error - The file name \"$cmdline_arg\" was "
+                send_error "preceded by the earlier file name \"$node_file\".\n"
+                set cmd_line_error_detected 1
+            } else {
+                # Record the input file name that contains the names of the nodes
+                # in the cluster
+                set node_file $cmdline_arg
+            }
+
+            if {![file exists $node_file]} {
+                send_error "Error - The file name \"$node_file\" does not exist.\n"
+                set cmd_line_error_detected 1
+            } elseif {![file isfile $node_file]} {
+                send_error "Error - The file name \"$node_file\" is not a regular file.\n"
+                set cmd_line_error_detected 1
+            } elseif {![file readable $node_file]} {
+                send_error "Error - The file name \"$node_file\" is not readable.\n"
+                set cmd_line_error_detected 1
+            }
+        }
+    }
+}
+
+# Was the command line okay?
+if {$cmd_line_error_detected == 0} {
+    # Disable the logging of information
+    log_user 0
+
+    # Prompt the user for a cluster password
+    set cluster_password [get_cluster_password "Enter your user password: "]
+    set cluster_password2 [get_cluster_password "Re-enter your user password: "]
+
+    # Enable the logging of information
+    log_user 1
+
+    # Open the input file that contains the list of cluster nodes
+    set infile [open $node_file r]
+
+    # Record the host name
+    set local_host [exec hostname]
+    # Record the character length of the host name
+    set local_host_string_length [string length $local_host]
+
+    # Spawn a shell process
+    spawn /bin/sh
+
+    # Do the two password strings match?
+    if {[string compare $cluster_password $cluster_password2] == 0} {
+        # Traverse through the list of nodes and establish secure shell connectivity
+        while {[gets $infile node] >= 0} {
+            # Record the character length for the node name
+            set node_string_length [string length $node]
+
+            # Is the present input line non-blank?
+            if {$node_string_length > 0} {
+                # Extract from the local host name the character at the beginning of the string
+                set char_at_node_string_beginning [string index $node 0]
+
+                # Is the first character a non-sharp comment character?
+                if {$char_at_node_string_beginning != "#"} {
+                    set compute_node_reached 1
+
+                    # Is this the first node that is being processed?
+                    if {$node_count == 0} {
+                        # Does the first node match the local host variable value?
+                        if {![string match $node $local_host]} {
+                            # Is the length of the local host name greater than that of the node name?
+                            if {$local_host_string_length > $node_string_length} {
+                                # The node name might be a shortened alias name to the local host name. Therfore,
+                                # extract characters 0 to 1 less than the length of the node name from the local host
+                                # character string
+                                set test_string [string range $local_host 0 [expr $node_string_length - 1]] 
+
+                                # Extract from the local host name the character at position node string length
+                                set char_at_node_string_length [string index $local_host $node_string_length]
+
+                                # Does the node name match the extracted test string and does the character from the
+                                # local host at position node string length match a period?
+                                if {![string match $node $test_string] || $char_at_node_string_length != "."} {
+                                    send_error "Error - The first node \"$node\" in file \"$node_file\" does "
+                                    send_error "not match the hostname command value \"$local_host\".\n"
+                                    exit
+                                }
+                            } else {
+                                send_error "Error - The first node \"$node\" in file \"$node_file\" does "
+                                send_error "not match the hostname command value \"$local_host\".\n"
+                                exit
+                            }
+                        }
+
+                        # Set up a .ssh directory for the master node
+                        send -- "ssh-keygen -t rsa\r"
+                        expect -re "^.*Generating public/private rsa key pair\\\.\r\nEnter file in which to save the key *"
+                        send -- "\r"
+                        expect {
+                            "Created directory *\\\.\r\nEnter passphrase (empty for no passphrase): " {
+                                send -- "\r"
+                                expect "Enter same passphrase again: "
+                                send -- "\r"
+                                expect {
+                                    -re "^.*Not a directory.*(%|\\\$|#|\[^>\]>) $" {
+                                        send_error "Error - secure shell connectivity was not established on host node \"$node\".\n"
+                                        send_error "The .ssh file exists but is not a directory. Terminating ssh connectivity!\n"
+                                        exit
+                                    }
+                                    -re "\r\nYour identification has been saved in (.)*\r\nYour public key has been saved in (.)*\r\nThe key fingerprint is:\r\n(.)*\r\n(.)*(%|\\\$|#|\[^>\]>) $" {
+                                    }
+                                    -re "\r\nYour identification has been saved in (.)*\r\nYour public key has been saved in (.)*\r\nThe key fingerprint is:\r\n(.)*\r\nThe key's randomart image is:\r\n(.)*\r\n(.)*(%|\\\$|#|\[^>\]>) $" {
+                                    }
+                                }
+                            }
+                            "*Enter passphrase (empty for no passphrase): " {
+                                send -- "\r"
+                                expect "Enter same passphrase again: "
+                                send -- "\r"
+                                expect {
+                                    -re "^.*Not a directory.*(%|\\\$|#|\[^>\]>) $" {
+                                        send_error "Error - secure shell connectivity was not established on host node \"$node\".\n"
+                                        send_error "The .ssh file exists but is not a directory. Terminating ssh connectivity!\n"
+                                        exit
+                                    }
+                                    -re "\r\nYour identification has been saved in (.)*\r\nYour public key has been saved in (.)*\r\nThe key fingerprint is:\r\n(.)*\r\n(.)*(%|\\\$|#|\[^>\]>) $" {
+                                    }
+                                    -re "\r\nYour identification has been saved in (.)*\r\nYour public key has been saved in (.)*\r\nThe key fingerprint is:\r\n(.)*\r\nThe key's randomart image is:\r\n(.)*\r\n(.)*(%|\\\$|#|\[^>\]>) $" {
+                                    }
+                                }
+                            }
+                            "*.ssh/id_rsa already exists.\r\nOverwrite (y/n)?" {
+                                send -- "y\r"
+                                expect "Enter passphrase (empty for no passphrase): "
+                                send -- "\r"
+                                expect "Enter same passphrase again: "
+                                send -- "\r"
+                                expect -re "^.*Your.*(%|\\\$|#|\[^>\]>) $"
+                            }
+                        }
+                        # Create an "authorized_keys" file for the master node
+                        send -- "cat ~/.ssh/*.pub >> ~/.ssh/authorized_keys\r"
+                        expect -re "$prompt"
+    
+                        # Adjust the permission bits on the "authorized_keys" file
+                        send -- "chmod go-rwx ~/.ssh/authorized_keys\r"
+                        expect -re "$prompt"
+
+                        # Create a temporary "authorized_keys" file for copying from the
+                        # master node to any compute nodes
+                        send -- "cat ~/.ssh/*.pub >> ~/.ssh/authorized_keys.$spawn_id.$env(USER)\r"
+                        expect -re "$prompt"
+
+                        # Adjust the permission bits on the home directory so that the "group" and "other"
+                        # users' access to this home directory do not have write capability
+                        send -- "chmod go-w ~/../$env(USER)\r"
+                        expect -re "$prompt"
+
+                        # Create a "known_hosts" entry for the master node
+                        send -- "ssh $node\r"
+                        expect {
+                            "The authenticity of host *" {
+                                send "yes\r"
+                                exp_continue
+                            }
+                            -re "(.)*\u001b\\\[m" {}
+                            -re "$prompt"
+                        }
+
+                        # Increment the count for the number of nodes that have been updated
+                        incr success_count
+                    } else {
+                        # Find out if a .ssh file exists on the given compute node
+                        send -- "ssh -n $node ls -aC ~/.ssh\r"
+                        expect {
+                            "The authenticity of host *" {
+                                send "yes\r"
+                                exp_continue
+                            }
+                            -nocase "*password*" {
+                                send -- "$cluster_password\r"
+                                exp_continue
+                            }
+                            -re "\r\nls: (.)*\\\.ssh: No such file or directory\r\n(.)*(%|\\\$|#|\[^>\]>) $" {
+                                # The .ssh file does not exist on the compute node
+                                send -- "ssh $node ssh-keygen -t rsa -N \\\"\\\"\r"
+                                exp_continue
+                            }
+                            -re "\r\nls: (.)*\\\.ssh: No such file or directory\r\n(.)*\u001b\\\[m" {
+                                # The .ssh file does not exist on the compute node
+                                send -- "ssh $node ssh-keygen -t rsa -N \\\"\\\"\r"
+                                exp_continue
+                            }
+                            "\r\nEnter file in which to save the key*" {
+                                send -- "\r"
+                                exp_continue
+                            }
+                            -re "\r\nGenerating public/private rsa key pair\\\.\r\nCreated directory (.)*\r\nYour identification has been saved in (.)*\r\nYour public key has been saved in (.)*\r\nThe key fingerprint is:\r\n(.)*\r\n(.)*(%|\\\$|#|\[^>\]>) $" {
+                            }
+                            -re "\r\nGenerating public/private rsa key pair\\\.\r\nCreated directory (.)*\r\nYour identification has been saved in (.)*\r\nYour public key has been saved in (.)*\r\nThe key fingerprint is:\r\n(.)*\r\n(.)*\u001b\\\[m" {
+                            }
+                            -re "ssh:(.)* Name or service not known(.)*" { 
+                                send_error "Error - Name or service not known for node \"$node\".\n" 
+                                set compute_node_reached 0 
+                            }        
+                            "*Temporary failure*" {
+                                send_error "Error - No ssh connection made to node \"$node\".\n"
+                                set compute_node_reached 0
+                            }
+                            "Permission denied*" {
+                                send_error "Error - User password entry generated permission denied message on node \"$node\".\n"
+                                set compute_node_reached 0
+                            }
+                            -re "(.)*\u001b\\\[m" {}
+                            -re "$prompt"
+                        }
+
+                        # Is the present compute node reachable?
+                        if {$compute_node_reached == 1} {
+                            # Copy the "authorized_keys" file from the master node to the compute node
+                            send -- "scp ~/.ssh/authorized_keys.$spawn_id.$env(USER) $node:~/.ssh/authorized_keys.$spawn_id\r"
+                            expect {
+                                -nocase "*password*" {
+                                    send -- "$cluster_password\r"
+                                    exp_continue
+                                }
+                                -re "(.)* \u001b\\\[K" {}
+                            	-re "(.)*\u001b\\\[m" {}
+                                -re "$prompt"
+                            }
+                            set authorized_keys_file_needs_updating 0
+                            send -- "ssh -n $node grep -f ~/.ssh/authorized_keys.$spawn_id ~/.ssh/authorized_keys\r"
+                            expect {
+                                -nocase "*password*" {
+                                    send -- "$cluster_password\r"
+                                    exp_continue
+                                }
+                                "*ssh-*" {
+                                    # We found a match within the "authorized_keys" file using the "grep" command.
+                                    # Set the "authorized_keys_file_needs_updating" variable to a value so that we
+                                    # do not proceed to update the "authorized_keys" file
+                                    set authorized_keys_file_needs_updating -1
+                                    exp_continue
+                                }
+                                "grep: *No such file or directory*" {
+                                    set authorized_keys_file_needs_updating 1
+                                    # Create an "authorized_keys" file for the compute node
+                                    send -- "ssh -n $node \"cat ~/.ssh/*.pub >> ~/.ssh/authorized_keys\"\r"
+                                    expect {
+                                        -nocase "*password*" {
+                                            send -- "$cluster_password\r"
+                                            exp_continue
+                                        }
+                                        -re "(.)* \u001b\\\[K" {}
+                                        -re "(.)*\u001b\\\[m" {}
+                                        -re "$prompt"
+                                    }
+
+                                    # Adjust the permission bits on the home directory so that the "group" and
+                                    # "other" users' access to this home directory do not have write capability
+                                    send -- "ssh -n $node chmod go-w ~/../$env(USER)\r"
+                                    expect {
+                                        -nocase "*password*" {
+                                            send -- "$cluster_password\r"
+                                            exp_continue
+                                        }
+                                        -re "(.)* \u001b\\\[K" {}
+                                        -re "(.)*\u001b\\\[m" {}
+                                        -re "$prompt"
+                                    }
+                                }
+                                -re "$prompt" {
+                                    # If the value of "authorized_keys_file_needs_updating" is still zero, then
+                                    # reaching the prompt state means that the "grep" operation did not determine
+                                    # a match
+                                    if {$authorized_keys_file_needs_updating == 0} {
+                                        set authorized_keys_file_needs_updating 1
+                                    }
+                                }
+                                -re "(.)*\u001b\\\[m" {
+                                    # If the value of "authorized_keys_file_needs_updating" is still zero, then
+                                    # reaching the prompt state means that the "grep" operation did not determine
+                                    # a match
+                                    if {$authorized_keys_file_needs_updating == 0} {
+                                        set authorized_keys_file_needs_updating 1
+                                    }
+                                }
+                            }
+
+                            # Does the "authorized_keys" file need updating on the compute node?
+                            if {$authorized_keys_file_needs_updating == 1} {
+                                send -- "ssh -n $node \"cat ~/.ssh/authorized_keys.$spawn_id >> ~/.ssh/authorized_keys\"\r"
+                                expect {
+                                    -nocase "*password*" {
+                                        send -- "$cluster_password\r"
+                                        exp_continue
+                                    }
+                                    -re "(.)* \u001b\\\[K" {}
+                                    -re "(.)*\u001b\\\[m" {}
+                                    -re "$prompt"
+                                }
+                                send -- "ssh -n $node chmod go-rwx ~/.ssh/authorized_keys\r"
+                                expect {
+                                    -nocase "*password*" {
+                                        send -- "$cluster_password\r"
+                                        exp_continue
+                                    }
+                                    -re "(.)* \u001b\\\[K" {}
+                                    -re "(.)*\u001b\\\[m" {}
+                                    -re "$prompt"
+                                }
+                            }
+
+                            # Remove the temporary "authorized_keys" file
+                            send -- "ssh -n $node rm -rf ~/.ssh/authorized_keys.$spawn_id\r"
+                            expect {
+                                -nocase "*password*" {
+                                    send -- "$cluster_password\r"
+                                    exp_continue
+                                }
+                                -re "(.)* \u001b\\\[K" {}
+                                -re "(.)*\u001b\\\[m" {}
+                                -re "$prompt"
+                            }
+                            # Increment the count for the number of nodes where the .ssh directory has
+                            # been successfully updated
+                            incr success_count
+                        }
+                    }
+
+                # Increment the count for the number of nodes that have been processed
+                incr node_count
+
+                set node_list($node_count) $node
+                }
+            }
+        }
+    } else {
+        send_error "Error - The two entries for the cluster password do not match.\n"
+        exit
+    }
+
+    # Remove the temporary "authorized_keys" file from the master node
+    send -- "rm -rf ~/.ssh/authorized_keys.$spawn_id.$env(USER)\r"
+    expect {
+        -re "(.)* \u001b\\\[K" {}
+        -re "(.)*\u001b\\\[m" {}
+        -re "$prompt"
+   }
+
+    close
+    wait
+}
+
+# Were all of the nodes in the cluster list successfully processed?
+if {$node_count == 0 && $success_count == 0} {
+    send_error "Node count = $node_count\n"
+    send_error "Success count = $success_count\n"
+    send_error "Error - Secure shell connectivity was not established on all nodes.\n"
+    send_error "For details, look for the text \"Error\" in the log output listing "
+    send_error "\"/tmp/sshconnectivity.$env(USER).log\".\n"
+    send_error "Version number: \$Revision: 259 $\n"
+    send_error "Version date: \$Date: 2012-06-11 23:26:12 +0400 (Mon, 11 Jun 2012) $\n"
+    send_error "\n"
+} elseif {$node_count == $success_count} {
+    # Spawn a second shell process
+    spawn /bin/sh
+    expect -re "$prompt"
+
+    # Determine if the public keys on the compute nodes are different from the master node. If so, then
+    # distribute each "~/.ssh/id_rsa.pub" to the "~/.ssh/authorized_keys" file on each of the other nodes
+    # within the cluster
+    for {set i 2} {$i <= $node_count} {incr i} {
+        # Copy the public key file from the compute node to the master node
+        send -- "scp $node_list($i):~/.ssh/id_rsa.pub ~/.ssh/id_rsa.pub.$spawn_id.$env(USER)\r"
+        expect -re "$prompt"
+
+        set authorized_keys_file_needs_updating 0
+        send -- "diff -b -B --brief ~/.ssh/id_rsa.pub.$spawn_id.$env(USER) ~/.ssh/id_rsa.pub\r"
+        expect {
+            "*File*differ" {
+                set authorized_keys_file_needs_updating 1
+                exp_continue
+            }
+            -re "$prompt"
+        }
+
+        # Does the "authorized_keys" file need updating with the public key from the compute node "i"?
+        if {$authorized_keys_file_needs_updating == 1} {
+            set no_known_hosts_file_on_compute_node 0
+            # Copy the "known_hosts" file from compute node "i" to the master node
+            send -- "scp $node_list($i):~/.ssh/known_hosts ~/.ssh/known_hosts.$spawn_id.$env(USER)\r"
+            expect {
+                "scp: *No such file or directory*\r\n(.)*\r\n(.)*(%|\\\$|#|\[^>\]>) $" {
+                    set no_known_hosts_file_on_compute_node 1
+                }
+                -re "$prompt"
+            }
+            # Does a "known_hosts" files exist on compute node "i"
+            if {$no_known_hosts_file_on_compute_node == 1} {
+                # The "known_hosts" file does not exist. Copy the "known_hosts" file from the master node to
+                # compute node "i"
+                send -- "scp ~/.ssh/known_hosts $node_list($i):~/.ssh/known_hosts\r"
+                expect -re "$prompt"
+            } else {
+                # Concatenate the "known_hosts" file from the master node to the "known_hosts" file that
+                # was retrieved from compute node "i"
+                send -- "cat ~/.ssh/known_hosts >> ~/.ssh/known_hosts.$spawn_id.$env(USER)\r"
+                expect -re "$prompt"
+                # Copy the updated "known_hosts" file from the master node to compute node "i"
+                send -- "scp ~/.ssh/known_hosts.$spawn_id.$env(USER) $node_list($i):~/.ssh/known_hosts\r"
+                expect -re "$prompt"
+                # Remove the updated "known_hosts" file from the master node
+                send -- "rm -rf ~/.ssh/known_hosts.$spawn_id.$env(USER)\r"
+                expect -re "$prompt"
+            }
+
+            # Copy the public key file from the compute node "i" to the master node
+            send -- "cat ~/.ssh/id_rsa.pub.$spawn_id.$env(USER) >> ~/.ssh/authorized_keys\r"
+            expect -re "$prompt"
+
+            for {set j 2} {$j <= $node_count} {incr j} {
+                # Is node "i" different from node "j"?
+                if {$i != $j} {
+                    # Copy the public key file from the compute node "i" to the compute node "j"
+                    send -- "scp ~/.ssh/id_rsa.pub.$spawn_id.$env(USER) $node_list($j):~/.ssh/id_rsa.pub.$spawn_id.$env(USER)\r"
+                    expect -re "$prompt"
+                    send -- "ssh -n $node_list($j) \"cat ~/.ssh/id_rsa.pub.$spawn_id.$env(USER) >> ~/.ssh/authorized_keys\"\r"
+                    expect -re "$prompt"
+                    send -- "ssh -n $node_list($j) \"rm -rf ~/.ssh/id_rsa.pub.$spawn_id.$env(USER)\"\r"
+                    expect -re "$prompt"
+                }
+            }
+
+            # Remove the temporary "id_rsa.pub" file from the master node
+            send -- "rm -rf ~/.ssh/id_rsa.pub.$spawn_id.$env(USER)\r"
+            expect -re "$prompt"
+        } else {
+            # Remove the temporary "id_rsa.pub" file from the master node
+            send -- "rm -rf ~/.ssh/id_rsa.pub.$spawn_id.$env(USER)\r"
+            expect -re "$prompt"
+        }
+    }
+
+    close
+    wait
+
+    send_user "\n"
+    send_user "*******************************************************************************\n"
+    send_user "Node count = $node_count\n"
+    send_user "Secure shell connectivity was established on all nodes.\n"
+    send_user "See the log output listing \"/tmp/sshconnectivity.$env(USER).log\" for details.\n"
+    send_user "Version number: \$Revision: 259 $\n"
+    send_user "Version date: \$Date: 2012-06-11 23:26:12 +0400 (Mon, 11 Jun 2012) $\n"
+    send_user "*******************************************************************************\n"
+    send_user "\n"
+} else {
+    send_error "Node count = $node_count\n"
+    send_error "Success count = $success_count\n"
+    send_error "Error - Secure shell connectivity was not established on all nodes.\n"
+    send_error "For details, look for the text \"Error\" in the log output listing "
+    send_error "\"/tmp/sshconnectivity.$env(USER).log\".\n"
+    send_error "Version number: \$Revision: 259 $\n"
+    send_error "Version date: \$Date: 2012-06-11 23:26:12 +0400 (Mon, 11 Jun 2012) $\n"
+    send_error "\n"
+}
+
+exit
